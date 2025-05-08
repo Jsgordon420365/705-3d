@@ -29,13 +29,16 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            background-color: rgba(255, 255, 255, 0.8);
+            background-color: rgba(255, 255, 255, 0.85); /* Slightly more opaque for readability */
             padding: 15px;
             border-radius: 8px;
             max-width: 300px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             z-index: 100;
-            transition: all 0.3s ease;
+            /* transition: all 0.3s ease; */
+            transition-property: opacity, transform; /* More specific transitions */
+            transition-duration: 0.3s;
+            transition-timing-function: ease;
         }
         
         #info-panel h1 {
@@ -61,7 +64,10 @@
             max-width: 300px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
             z-index: 100;
-            transition: all 0.3s ease;
+            /* transition: all 0.3s ease; */
+            transition-property: opacity, transform; /* More specific transitions */
+            transition-duration: 0.3s;
+            transition-timing-function: ease;
             opacity: 0;
             transform: translateY(20px);
         }
@@ -87,7 +93,7 @@
             position: absolute;
             bottom: 20px;
             left: 20px;
-            background-color: rgba(255, 255, 255, 0.8);
+            background-color: rgba(255, 255, 255, 0.85); /* Slightly more opaque */
             padding: 15px;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -112,6 +118,7 @@
             align-items: center;
             z-index: 1000;
             transition: opacity 0.5s ease;
+            /* aria-hidden initially true, will be set to false by JS when hidden */
         }
         
         #loading.hidden {
@@ -135,7 +142,7 @@
     </style>
 </head>
 <body>
-    <div id="loading">
+    <div id="loading" aria-hidden="false">
         <div class="loader"></div>
     </div>
     
@@ -157,14 +164,17 @@
     </div>
     
     <div id="controls">
-        <p>Mouse: Rotate view</p>
-        <p>Scroll: Zoom in/out</p>
+        <p>Mouse Left: Rotate view</p>
+        <p>Mouse Middle/Scroll: Zoom</p>
+        <p>Mouse Right: Pan view</p>
         <p>Click on units for details</p>
     </div>
     
     <!-- Use a stable version of Three.js that's well-supported -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js"></script>
-    
+    <!-- Add OrbitControls from CDN (compatible with r110) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.110.0/examples/js/controls/OrbitControls.js"></script>
+
     <script>
     // Unit data for the apartment building
     const unitData = [
@@ -177,151 +187,21 @@
         { id: 7, number: "Unit 7", size: "1BR, 700 sq ft", features: "Hardwood Floors" },
         { id: 8, number: "Unit 8", size: "2BR, 900 sq ft", features: "Corner Unit, Renovated" }
     ];
-    
+
     // Main Three.js variables
-    let scene, camera, renderer, controls;
-    let unitMeshes = [];
+    let scene, camera, renderer, orbitControls; // Changed 'controls' to 'orbitControls'
+    const unitMeshes = [];
     let raycaster, mouse;
     let selectedUnit = null;
-    let unitInfoPanel = document.getElementById('unit-info');
-    
-    // SimplifiedOrbitControls implementation
-    function SimplifiedOrbitControls(camera, domElement) {
-        this.camera = camera;
-        this.domElement = domElement;
-        this.target = new THREE.Vector3(0, 0, 0);
-        
-        // Current position in spherical coordinates
-        const spherical = new THREE.Spherical();
-        const sphericalDelta = new THREE.Spherical();
-        let scale = 1;
-        const panOffset = new THREE.Vector3();
-        
-        // Mouse states
-        const STATE = { NONE: -1, ROTATE: 0, DOLLY: 1, PAN: 2 };
-        let state = STATE.NONE;
-        
-        // Mouse positions
-        const startPoint = new THREE.Vector2();
-        const endPoint = new THREE.Vector2();
-        const delta = new THREE.Vector2();
-        
-        this.update = function() {
-            const offset = new THREE.Vector3();
-            
-            // Get current camera position
-            offset.copy(camera.position).sub(this.target);
-            
-            // Convert to spherical coordinates
-            spherical.setFromVector3(offset);
-            
-            // Apply deltas
-            spherical.theta += sphericalDelta.theta;
-            spherical.phi += sphericalDelta.phi;
-            
-            // Restrict phi to avoid the camera flipping
-            spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
-            
-            // Apply scale and ensure min/max distance
-            spherical.radius *= scale;
-            spherical.radius = Math.max(1, Math.min(100, spherical.radius));
-            
-            // Move target by pan amount
-            this.target.add(panOffset);
-            
-            // Set new camera position
-            offset.setFromSpherical(spherical);
-            camera.position.copy(this.target).add(offset);
-            camera.lookAt(this.target);
-            
-            // Reset values
-            sphericalDelta.set(0, 0, 0);
-            panOffset.set(0, 0, 0);
-            scale = 1;
-        };
-        
-        // Setup event handlers
-        domElement.addEventListener('mousedown', onMouseDown);
-        domElement.addEventListener('wheel', onMouseWheel);
-        domElement.addEventListener('contextmenu', function(event) { event.preventDefault(); });
-        
-        function onMouseDown(event) {
-            event.preventDefault();
-            
-            if (event.button === 0) { // Left mouse button
-                state = STATE.ROTATE;
-                startPoint.set(event.clientX, event.clientY);
-            } else if (event.button === 1) { // Middle mouse button
-                state = STATE.DOLLY;
-                startPoint.set(event.clientX, event.clientY);
-            } else if (event.button === 2) { // Right mouse button
-                state = STATE.PAN;
-                startPoint.set(event.clientX, event.clientY);
-            }
-            
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        }
-        
-        function onMouseMove(event) {
-            event.preventDefault();
-            
-            endPoint.set(event.clientX, event.clientY);
-            delta.subVectors(endPoint, startPoint);
-            
-            if (state === STATE.ROTATE) {
-                // Convert x movement to rotation around y-axis
-                sphericalDelta.theta -= 2 * Math.PI * delta.x / domElement.clientWidth;
-                
-                // Convert y movement to rotation around x-axis
-                sphericalDelta.phi -= 2 * Math.PI * delta.y / domElement.clientHeight;
-            } else if (state === STATE.DOLLY) {
-                // Dolly in/out based on y movement
-                if (delta.y > 0) {
-                    scale *= 1.1;
-                } else {
-                    scale /= 1.1;
-                }
-            } else if (state === STATE.PAN) {
-                // Calculate pan amount
-                const offset = new THREE.Vector3();
-                const position = camera.position;
-                offset.copy(position).sub(this.target);
-                
-                // Left/right movement
-                const targetDistance = offset.length() * Math.tan((camera.fov / 2) * Math.PI / 180.0);
-                const panLeft = new THREE.Vector3();
-                panLeft.setFromMatrixColumn(camera.matrix, 0); // Get X column
-                panLeft.multiplyScalar(-2 * delta.x * targetDistance / domElement.clientHeight);
-                
-                // Up/down movement
-                const panUp = new THREE.Vector3();
-                panUp.setFromMatrixColumn(camera.matrix, 1); // Get Y column
-                panUp.multiplyScalar(2 * delta.y * targetDistance / domElement.clientHeight);
-                
-                panOffset.add(panLeft).add(panUp);
-            }
-            
-            startPoint.copy(endPoint);
-        }
-        
-        function onMouseUp() {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            state = STATE.NONE;
-        }
-        
-        function onMouseWheel(event) {
-            event.preventDefault();
-            
-            if (event.deltaY < 0) {
-                scale /= 1.1;
-            } else {
-                scale *= 1.1;
-            }
-        }
-    }
-    
+    let previouslyHoveredUnit = null; // For efficient hover
+    const unitInfoPanel = document.getElementById('unit-info');
+    const loadingScreen = document.getElementById('loading');
+
+    // Default unit colors
+    const DEFAULT_UNIT_COLOR = 0xF9C74F; // Yellow brick
+    const HOVER_UNIT_EMISSIVE_COLOR = 0x553300; // Darker orange/brown glow
+    const SELECTED_UNIT_COLOR = 0xFFA500; // Orange highlight
+
     // Initialize the scene
     function init() {
         // Create scene
@@ -335,16 +215,24 @@
             0.1,
             1000
         );
-        camera.position.set(0, 10, 30);
+        camera.position.set(0, 15, 35); // Adjusted initial camera position slightly
         
         // Create renderer
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
         document.getElementById('canvas-container').appendChild(renderer.domElement);
         
         // Create orbit controls
-        controls = new SimplifiedOrbitControls(camera, renderer.domElement);
+        orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+        orbitControls.enableDamping = true; // an animation loop is required when either damping or auto-rotate are enabled
+        orbitControls.dampingFactor = 0.05;
+        orbitControls.screenSpacePanning = false;
+        orbitControls.minDistance = 5;
+        orbitControls.maxDistance = 100;
+        orbitControls.maxPolarAngle = Math.PI / 2 - 0.05; // Prevent camera from going below ground
+        orbitControls.target.set(0, 2, 0); // Set initial target slightly above ground center
         
         // Setup raycaster for interaction
         raycaster = new THREE.Raycaster();
@@ -353,7 +241,7 @@
         // Add event listeners
         window.addEventListener('resize', onWindowResize);
         renderer.domElement.addEventListener('click', onMouseClick);
-        renderer.domElement.addEventListener('mousemove', onMouseMove);
+        renderer.domElement.addEventListener('mousemove', onMouseMove); // Changed from document to renderer.domElement for consistency
         
         // Build the 3D scene
         createLighting();
@@ -364,8 +252,9 @@
         
         // Hide loading screen
         setTimeout(() => {
-            document.getElementById('loading').classList.add('hidden');
-        }, 1000);
+            loadingScreen.classList.add('hidden');
+            loadingScreen.setAttribute('aria-hidden', 'true');
+        }, 1000); // Simulating load time, replace with LoadingManager for actual assets
         
         // Start animation loop
         animate();
@@ -374,26 +263,37 @@
     // Create lighting for the scene
     function createLighting() {
         // Ambient light for overall illumination
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Slightly increased intensity
         scene.add(ambientLight);
         
         // Directional light for shadows (like sunlight)
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(10, 20, 15);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9); // Slightly increased intensity
+        directionalLight.position.set(15, 25, 20);
         directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 1024;
-        directionalLight.shadow.mapSize.height = 1024;
+        directionalLight.shadow.mapSize.width = 2048; // Increased shadow map resolution
+        directionalLight.shadow.mapSize.height = 2048;
+
+        // Optimize shadow camera frustum
+        directionalLight.shadow.camera.left = -40;
+        directionalLight.shadow.camera.right = 40;
+        directionalLight.shadow.camera.top = 40;
+        directionalLight.shadow.camera.bottom = -40;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 100; 
+        // directionalLight.shadow.camera.updateProjectionMatrix(); // Not needed if set before first render
         scene.add(directionalLight);
+
+        // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera); // For debugging
+        // scene.add(shadowHelper);
     }
     
     // Create ground plane with grass texture
     function createGround() {
-        // Main ground/lot
-        const groundGeometry = new THREE.PlaneGeometry(60, 40);
+        const groundGeometry = new THREE.PlaneGeometry(80, 60); // Made ground larger
         const groundMaterial = new THREE.MeshStandardMaterial({
             color: 0x7CFC00,  // Lawn green
-            roughness: 0.8,
-            metalness: 0.2
+            roughness: 0.9,   // More rough for grass
+            metalness: 0.1
         });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2; // Rotate to horizontal
@@ -403,7 +303,6 @@
     
     // Create the apartment building
     function createBuilding() {
-        // Main building foundation
         const buildingWidth = 40;
         const buildingDepth = 10;
         const buildingHeight = 4;
@@ -412,7 +311,7 @@
         // Building base with yellow brick material
         const buildingGeometry = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
         const buildingMaterial = new THREE.MeshStandardMaterial({
-            color: 0xF9C74F,  // Yellow brick
+            color: DEFAULT_UNIT_COLOR,
             roughness: 0.7,
             metalness: 0.2
         });
@@ -423,7 +322,7 @@
         scene.add(building);
         
         // Create roof
-        const roofGeometry = new THREE.BoxGeometry(buildingWidth + 1, 0.5, buildingDepth + 1);
+        const roofGeometry = new THREE.BoxGeometry(buildingWidth + 0.5, 0.5, buildingDepth + 0.5); // Slightly smaller overlap
         const roofMaterial = new THREE.MeshStandardMaterial({
             color: 0x666666,  // Dark gray
             roughness: 0.6,
@@ -433,136 +332,105 @@
         roof.position.y = buildingHeight + 0.25;
         roof.castShadow = true;
         scene.add(roof);
+
+        // Shared geometries and materials for unit parts
+        const doorWidth = 1.2;
+        const doorHeight = 2.5;
+        const doorGeometry = new THREE.BoxGeometry(doorWidth, doorHeight, 0.2);
+        const doorMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.5, metalness: 0.1 });
+
+        const windowWidth = 1.2;
+        const windowHeight = 1.5;
+        const windowGeometry = new THREE.BoxGeometry(windowWidth, windowHeight, 0.1);
+        const windowMaterial = new THREE.MeshStandardMaterial({ color: 0xADD8E6, roughness: 0.3, metalness: 0.3, transparent: true, opacity: 0.6 }); // Lighter blue
+
+        const labelGeometry = new THREE.PlaneGeometry(1, 0.5);
+        const labelMaterial = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
         
         // Create individual units
         for (let i = 0; i < 8; i++) {
-            // Create unit with slightly different material to allow for highlighting
-            const unitGeometry = new THREE.BoxGeometry(unitWidth - 0.1, buildingHeight, buildingDepth - 0.1);
             const unitMaterial = new THREE.MeshStandardMaterial({
-                color: 0xF9C74F,
+                color: DEFAULT_UNIT_COLOR,
                 roughness: 0.7,
-                metalness: 0.2
+                metalness: 0.2,
+                emissive: 0x000000 // Initialize emissive property
             });
+            const unitGeometry = new THREE.BoxGeometry(unitWidth - 0.1, buildingHeight, buildingDepth - 0.1);
             const unit = new THREE.Mesh(unitGeometry, unitMaterial);
             
-            // Position unit within the building
             unit.position.x = -buildingWidth / 2 + unitWidth / 2 + i * unitWidth;
             unit.position.y = buildingHeight / 2;
-            unit.userData = { isUnit: true, unitIndex: i };
+            unit.userData = { isUnit: true, unitIndex: i, originalColor: new THREE.Color(DEFAULT_UNIT_COLOR) }; // Store original color
             
-            scene.add(unit);
+            scene.add(unit); // Add unit mesh directly to scene for easier picking
             unitMeshes.push(unit);
             
             // Add door to unit (white)
-            const doorWidth = 1.2;
-            const doorHeight = 2.5;
-            const doorGeometry = new THREE.BoxGeometry(doorWidth, doorHeight, 0.2);
-            const doorMaterial = new THREE.MeshStandardMaterial({
-                color: 0xFFFFFF,  // White
-                roughness: 0.5,
-                metalness: 0.1
-            });
             const door = new THREE.Mesh(doorGeometry, doorMaterial);
-            door.position.z = buildingDepth / 2 + 0.1;
-            door.position.y = -buildingHeight / 2 + doorHeight / 2;
+            door.position.z = buildingDepth / 2 + 0.1; // Relative to building front
+            door.position.y = -buildingHeight / 2 + doorHeight / 2; // Relative to unit bottom
             door.castShadow = true;
-            unit.add(door);
+            unit.add(door); // Add door as child of unit
             
             // Add windows (two per unit)
-            const windowWidth = 1.2;
-            const windowHeight = 1.5;
-            const windowGeometry = new THREE.BoxGeometry(windowWidth, windowHeight, 0.1);
-            const windowMaterial = new THREE.MeshStandardMaterial({
-                color: 0x87CEEB,  // Sky blue
-                roughness: 0.3,
-                metalness: 0.3,
-                transparent: true,
-                opacity: 0.7
-            });
-            
-            // Left window
             const leftWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-            leftWindow.position.z = buildingDepth / 2 + 0.05;
-            leftWindow.position.x = -unitWidth / 4;
-            leftWindow.position.y = 0.5;
+            leftWindow.position.set(-unitWidth / 4, 0.5, buildingDepth / 2 + 0.05); // Relative to unit center
             leftWindow.castShadow = true;
             unit.add(leftWindow);
             
-            // Right window
             const rightWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-            rightWindow.position.z = buildingDepth / 2 + 0.05;
-            rightWindow.position.x = unitWidth / 4;
-            rightWindow.position.y = 0.5;
+            rightWindow.position.set(unitWidth / 4, 0.5, buildingDepth / 2 + 0.05); // Relative to unit center
             rightWindow.castShadow = true;
             unit.add(rightWindow);
             
-            // Add unit number text (simplified, using a small plane as a label)
-            const labelGeometry = new THREE.PlaneGeometry(1, 0.5);
-            const labelMaterial = new THREE.MeshBasicMaterial({
-                color: 0x333333,
-                side: THREE.DoubleSide
-            });
+            // Add unit number text (simplified label)
             const label = new THREE.Mesh(labelGeometry, labelMaterial);
-            label.position.z = buildingDepth / 2 + 0.15;
-            label.position.y = 1.5;
+            label.position.set(0, 1.5, buildingDepth / 2 + 0.15); // Relative to unit center
             unit.add(label);
         }
     }
     
     // Create parking lot with spaces
     function createParkingLot() {
-        // Main parking lot
-        const parkingWidth = 25;
+        const parkingWidth = 30; // Slightly wider
         const parkingDepth = 15;
         const parkingGeometry = new THREE.PlaneGeometry(parkingWidth, parkingDepth);
         const parkingMaterial = new THREE.MeshStandardMaterial({
-            color: 0x333333,  // Asphalt
+            color: 0x444444,  // Darker Asphalt
             roughness: 0.9,
             metalness: 0.1
         });
         const parkingLot = new THREE.Mesh(parkingGeometry, parkingMaterial);
         parkingLot.rotation.x = -Math.PI / 2;
-        parkingLot.position.z = -12;
-        parkingLot.position.y = 0.01; // Slightly above ground
+        parkingLot.position.set(0, 0.01, -12); // Centered X, slightly above ground
         parkingLot.receiveShadow = true;
         scene.add(parkingLot);
         
-        // Create parking spaces
         const spaceWidth = 3;
         const spaceDepth = 6;
         const spacesPerRow = 8;
         const rows = 2;
-        
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xFFFFFF, linewidth: 2 }); // Shared material
+
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < spacesPerRow; col++) {
-                // Parking space outlines
                 const lineGeometry = new THREE.BufferGeometry();
-                
-                // Create rectangle vertices
                 const halfWidth = spaceWidth / 2 - 0.1;
                 const halfDepth = spaceDepth / 2 - 0.1;
                 
                 const vertices = new Float32Array([
-                    -halfWidth, 0, -halfDepth,
-                    halfWidth, 0, -halfDepth,
-                    halfWidth, 0, halfDepth,
-                    -halfWidth, 0, halfDepth,
-                    -halfWidth, 0, -halfDepth
+                    -halfWidth, 0, -halfDepth,  halfWidth, 0, -halfDepth,
+                     halfWidth, 0, -halfDepth,  halfWidth, 0,  halfDepth,
+                     halfWidth, 0,  halfDepth, -halfWidth, 0,  halfDepth,
+                    -halfWidth, 0,  halfDepth, -halfWidth, 0, -halfDepth
                 ]);
-                
                 lineGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+                const line = new THREE.LineSegments(lineGeometry, lineMaterial); // Use LineSegments for distinct lines
                 
-                const lineMaterial = new THREE.LineBasicMaterial({
-                    color: 0xFFFFFF
-                });
-                
-                const line = new THREE.Line(lineGeometry, lineMaterial);
-                
-                line.rotation.x = -Math.PI / 2;
-                line.position.x = -parkingWidth / 2 + spaceWidth / 2 + col * spaceWidth;
-                line.position.z = -12 + (row === 0 ? -spaceDepth / 2 : spaceDepth / 2);
+                line.rotation.x = -Math.PI / 2; // This orients the line's local XY plane to be world XZ
+                line.position.x = - (spacesPerRow * spaceWidth / 2) + spaceWidth / 2 + col * spaceWidth;
+                line.position.z = -12 + (row === 0 ? -parkingDepth/4 -spaceDepth / 4 : parkingDepth/4 + spaceDepth / 4) - (spaceDepth/2 * (row === 0 ? 1: -1));
                 line.position.y = 0.02; // Slightly above the parking lot
-                
                 scene.add(line);
             }
         }
@@ -570,41 +438,27 @@
     
     // Create trees around the property
     function createTrees() {
-        // Define tree positions
         const treePositions = [
-            { x: -25, z: -15 },
-            { x: -20, z: 15 },
-            { x: -15, z: -10 },
-            { x: -5, z: 18 },
-            { x: 5, z: -18 },
-            { x: 15, z: 12 },
-            { x: 20, z: -12 },
-            { x: 25, z: 15 }
+            { x: -28, z: -18 }, { x: -22, z: 18 }, { x: -18, z: -12 },
+            { x: -8, z: 20 }, { x: 8, z: -20 }, { x: 18, z: 15 },
+            { x: 25, z: -15 }, { x: 30, z: 18 }
         ];
         
+        // Shared geometries and materials for trees
+        const trunkGeometry = new THREE.CylinderGeometry(0.4, 0.5, 3, 8); // Slimmer trunk
+        const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9, metalness: 0.1 });
+        const foliageGeometry = new THREE.SphereGeometry(2.2, 10, 8); // Slightly smaller, less segments
+        const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8, metalness: 0.1 });
+
         treePositions.forEach(pos => {
-            // Tree trunk
-            const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.6, 3, 8);
-            const trunkMaterial = new THREE.MeshStandardMaterial({
-                color: 0x8B4513,  // Brown
-                roughness: 0.9,
-                metalness: 0.1
-            });
             const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
             trunk.position.set(pos.x, 1.5, pos.z);
             trunk.castShadow = true;
             trunk.receiveShadow = true;
             scene.add(trunk);
             
-            // Tree foliage
-            const foliageGeometry = new THREE.SphereGeometry(2.5, 10, 10);
-            const foliageMaterial = new THREE.MeshStandardMaterial({
-                color: 0x228B22,  // Forest green
-                roughness: 0.8,
-                metalness: 0.1
-            });
             const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
-            foliage.position.set(pos.x, 4.5, pos.z);
+            foliage.position.set(pos.x, 4.2, pos.z); // Adjusted foliage height
             foliage.castShadow = true;
             foliage.receiveShadow = true;
             scene.add(foliage);
@@ -620,119 +474,96 @@
     
     // Handle mouse click events for unit selection
     function onMouseClick(event) {
-        // Calculate mouse position in normalized device coordinates
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-        
-        // Update the picking ray with the camera and mouse position
         raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(unitMeshes, true); // Intersect only unitMeshes and their children
         
-        // Calculate objects intersecting the ray
-        const intersects = raycaster.intersectObjects(scene.children, true);
-        
-        // Check for unit intersections
-        let foundUnit = false;
-        
-        for (let i = 0; i < intersects.length; i++) {
-            // Find the parent unit mesh (if clicked on a door/window)
-            let object = intersects[i].object;
-            let testObj = object;
-            
-            // Traverse up to find parent with userData.isUnit
-            while (testObj && !testObj.userData.isUnit && testObj.parent) {
-                testObj = testObj.parent;
+        let clickedUnitObj = null;
+        if (intersects.length > 0) {
+            let obj = intersects[0].object;
+            while(obj && !obj.userData.isUnit && obj.parent){
+                obj = obj.parent;
             }
-            
-            if (testObj && testObj.userData.isUnit) {
-                const unitIndex = testObj.userData.unitIndex;
-                selectUnit(unitIndex);
-                foundUnit = true;
-                break;
+            if(obj && obj.userData.isUnit){
+                clickedUnitObj = obj;
             }
         }
-        
-        // If didn't click on a unit, deselect
-        if (!foundUnit && selectedUnit !== null) {
+
+        if (clickedUnitObj) {
+            selectUnit(clickedUnitObj.userData.unitIndex);
+        } else if (selectedUnit !== null && event.target === renderer.domElement) { 
+            // Deselect if clicked on canvas but not on a unit
             deselectUnit();
         }
     }
     
     // Handle mouse move for hover effects
     function onMouseMove(event) {
-        // Calculate mouse position
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-        
-        // Update the picking ray
         raycaster.setFromCamera(mouse, camera);
-        
-        // Check for intersects
-        const intersects = raycaster.intersectObjects(scene.children, true);
-        
-        // Reset all unit colors
-        unitMeshes.forEach(unit => {
-            if (unit !== selectedUnit) {
-                unit.material.color.setHex(0xF9C74F); // Reset to default yellow
-                if (unit.material.emissive) {
-                    unit.material.emissive.setHex(0x000000); // No emissive
-                }
+        const intersects = raycaster.intersectObjects(unitMeshes, true); // Intersect only unitMeshes and their children
+
+        let currentHoveredUnitObj = null;
+        if (intersects.length > 0) {
+            let obj = intersects[0].object;
+            while(obj && !obj.userData.isUnit && obj.parent){
+                obj = obj.parent;
             }
-        });
-        
-        // Highlight hovered unit
-        let hoveredUnit = null;
-        
-        for (let i = 0; i < intersects.length; i++) {
-            // Find parent unit
-            let object = intersects[i].object;
-            let testObj = object;
-            
-            // Traverse up to find parent with userData.isUnit
-            while (testObj && !testObj.userData.isUnit && testObj.parent) {
-                testObj = testObj.parent;
-            }
-            
-            if (testObj && testObj.userData.isUnit && testObj !== selectedUnit) {
-                if (testObj.material.emissive) {
-                    testObj.material.emissive.setHex(0x331100); // Subtle glow
-                }
-                hoveredUnit = testObj;
-                break;
+            if(obj && obj.userData.isUnit){
+                currentHoveredUnitObj = obj;
             }
         }
-        
-        // Update cursor
-        document.body.style.cursor = hoveredUnit ? 'pointer' : 'default';
+
+        // If there was a previously hovered unit, and it's not the current one, and not selected
+        if (previouslyHoveredUnit && previouslyHoveredUnit !== currentHoveredUnitObj && previouslyHoveredUnit !== selectedUnit) {
+            previouslyHoveredUnit.material.emissive.setHex(0x000000); // Reset emissive
+            // Optionally reset base color if hover changed it:
+            // previouslyHoveredUnit.material.color.setHex(previouslyHoveredUnit.userData.originalColor.getHex());
+        }
+
+        // If there's a current hovered unit, and it's not selected
+        if (currentHoveredUnitObj && currentHoveredUnitObj !== selectedUnit) {
+            currentHoveredUnitObj.material.emissive.setHex(HOVER_UNIT_EMISSIVE_COLOR);
+            renderer.domElement.style.cursor = 'pointer';
+        } else {
+            renderer.domElement.style.cursor = 'default';
+        }
+        previouslyHoveredUnit = currentHoveredUnitObj;
     }
     
     // Select a unit
     function selectUnit(index) {
-        // Deselect previous
+        // Deselect previous if any unit is selected
         if (selectedUnit !== null) {
             deselectUnit();
         }
         
-        // Highlight selected unit
         selectedUnit = unitMeshes[index];
-        selectedUnit.material.color.setHex(0xFFA500); // Orange highlight
         
-        // Update info panel
+        // Clear any hover effect from the unit being selected
+        selectedUnit.material.emissive.setHex(0x000000); 
+        selectedUnit.material.color.setHex(SELECTED_UNIT_COLOR); // Apply selection color
+        
         const unitInfo = unitData[index];
         document.getElementById('unit-number').textContent = `Unit: ${unitInfo.number}`;
         document.getElementById('unit-size').textContent = `Size: ${unitInfo.size}`;
         document.getElementById('unit-features').textContent = `Features: ${unitInfo.features}`;
-        
-        // Show info panel
         unitInfoPanel.classList.add('active');
+
+        // If the selected unit was the previously hovered one, clear previouslyHoveredUnit
+        if (previouslyHoveredUnit === selectedUnit) {
+            previouslyHoveredUnit = null; 
+        }
     }
     
     // Deselect current unit
     function deselectUnit() {
         if (selectedUnit !== null) {
-            selectedUnit.material.color.setHex(0xF9C74F); // Reset to yellow
+            selectedUnit.material.color.setHex(selectedUnit.userData.originalColor.getHex()); // Reset to original color
+            selectedUnit.material.emissive.setHex(0x000000); // Reset emissive
             selectedUnit = null;
-            
-            // Hide info panel
             unitInfoPanel.classList.remove('active');
         }
     }
@@ -740,7 +571,7 @@
     // Animation loop
     function animate() {
         requestAnimationFrame(animate);
-        controls.update();
+        orbitControls.update(); // Only required if controls.enableDamping or controls.autoRotate are set to true
         renderer.render(scene, camera);
     }
     

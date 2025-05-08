@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>705 Chestnut St - 3D Apartment Model</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+        
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 300px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+            transition: all 0.3s ease;
+        }
+        
+        #info-panel h1 {
+            margin-bottom: 10px;
+            font-size: 18px;
+            color: #333;
+        }
+        
+        #info-panel p {
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        #unit-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(34, 34, 34, 0.85);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 300px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            transition: all 0.3s ease;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        
+        #unit-info.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        #unit-info h2 {
+            margin-bottom: 10px;
+            font-size: 18px;
+            color: #fff;
+        }
+        
+        #unit-info p {
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #ddd;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+        }
+        
+        #controls p {
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.5s ease;
+        }
+        
+        #loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="loader"></div>
+    </div>
+    
+    <div id="canvas-container"></div>
+    
+    <div id="info-panel">
+        <h1>705 Chestnut St, Greensboro, NC</h1>
+        <p><strong>Building Type:</strong> Single-story apartment</p>
+        <p><strong>Units:</strong> 8 apartment units</p>
+        <p><strong>Lot Size:</strong> ~0.84 acres</p>
+        <p><strong>Features:</strong> Yellow brick, white doors</p>
+    </div>
+    
+    <div id="unit-info">
+        <h2>Unit Information</h2>
+        <p id="unit-number">Unit: </p>
+        <p id="unit-size">Size: </p>
+        <p id="unit-features">Features: </p>
+    </div>
+    
+    <div id="controls">
+        <p>Mouse: Rotate view</p>
+        <p>Scroll: Zoom in/out</p>
+        <p>Click on units for details</p>
+    </div>
+    
+    <!-- Use a stable version of Three.js that's well-supported -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js"></script>
+    
+    <script>
+    // Unit data for the apartment building
+    const unitData = [
+        { id: 1, number: "Unit 1", size: "1BR, 700 sq ft", features: "Recently Renovated" },
+        { id: 2, number: "Unit 2", size: "2BR, 850 sq ft", features: "Corner Unit" },
+        { id: 3, number: "Unit 3", size: "1BR, 700 sq ft", features: "Renovated Kitchen" },
+        { id: 4, number: "Unit 4", size: "Studio, 550 sq ft", features: "Updated Bath" },
+        { id: 5, number: "Unit 5", size: "1BR, 720 sq ft", features: "New Appliances" },
+        { id: 6, number: "Unit 6", size: "2BR, 850 sq ft", features: "Recently Painted" },
+        { id: 7, number: "Unit 7", size: "1BR, 700 sq ft", features: "Hardwood Floors" },
+        { id: 8, number: "Unit 8", size: "2BR, 900 sq ft", features: "Corner Unit, Renovated" }
+    ];
+    
+    // Main Three.js variables
+    let scene, camera, renderer, controls;
+    let unitMeshes = [];
+    let raycaster, mouse;
+    let selectedUnit = null;
+    let unitInfoPanel = document.getElementById('unit-info');
+    
+    // SimplifiedOrbitControls implementation
+    function SimplifiedOrbitControls(camera, domElement) {
+        this.camera = camera;
+        this.domElement = domElement;
+        this.target = new THREE.Vector3(0, 0, 0);
+        
+        // Current position in spherical coordinates
+        const spherical = new THREE.Spherical();
+        const sphericalDelta = new THREE.Spherical();
+        let scale = 1;
+        const panOffset = new THREE.Vector3();
+        
+        // Mouse states
+        const STATE = { NONE: -1, ROTATE: 0, DOLLY: 1, PAN: 2 };
+        let state = STATE.NONE;
+        
+        // Mouse positions
+        const startPoint = new THREE.Vector2();
+        const endPoint = new THREE.Vector2();
+        const delta = new THREE.Vector2();
+        
+        this.update = function() {
+            const offset = new THREE.Vector3();
+            
+            // Get current camera position
+            offset.copy(camera.position).sub(this.target);
+            
+            // Convert to spherical coordinates
+            spherical.setFromVector3(offset);
+            
+            // Apply deltas
+            spherical.theta += sphericalDelta.theta;
+            spherical.phi += sphericalDelta.phi;
+            
+            // Restrict phi to avoid the camera flipping
+            spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+            
+            // Apply scale and ensure min/max distance
+            spherical.radius *= scale;
+            spherical.radius = Math.max(1, Math.min(100, spherical.radius));
+            
+            // Move target by pan amount
+            this.target.add(panOffset);
+            
+            // Set new camera position
+            offset.setFromSpherical(spherical);
+            camera.position.copy(this.target).add(offset);
+            camera.lookAt(this.target);
+            
+            // Reset values
+            sphericalDelta.set(0, 0, 0);
+            panOffset.set(0, 0, 0);
+            scale = 1;
+        };
+        
+        // Setup event handlers
+        domElement.addEventListener('mousedown', onMouseDown);
+        domElement.addEventListener('wheel', onMouseWheel);
+        domElement.addEventListener('contextmenu', function(event) { event.preventDefault(); });
+        
+        function onMouseDown(event) {
+            event.preventDefault();
+            
+            if (event.button === 0) { // Left mouse button
+                state = STATE.ROTATE;
+                startPoint.set(event.clientX, event.clientY);
+            } else if (event.button === 1) { // Middle mouse button
+                state = STATE.DOLLY;
+                startPoint.set(event.clientX, event.clientY);
+            } else if (event.button === 2) { // Right mouse button
+                state = STATE.PAN;
+                startPoint.set(event.clientX, event.clientY);
+            }
+            
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        }
+        
+        function onMouseMove(event) {
+            event.preventDefault();
+            
+            endPoint.set(event.clientX, event.clientY);
+            delta.subVectors(endPoint, startPoint);
+            
+            if (state === STATE.ROTATE) {
+                // Convert x movement to rotation around y-axis
+                sphericalDelta.theta -= 2 * Math.PI * delta.x / domElement.clientWidth;
+                
+                // Convert y movement to rotation around x-axis
+                sphericalDelta.phi -= 2 * Math.PI * delta.y / domElement.clientHeight;
+            } else if (state === STATE.DOLLY) {
+                // Dolly in/out based on y movement
+                if (delta.y > 0) {
+                    scale *= 1.1;
+                } else {
+                    scale /= 1.1;
+                }
+            } else if (state === STATE.PAN) {
+                // Calculate pan amount
+                const offset = new THREE.Vector3();
+                const position = camera.position;
+                offset.copy(position).sub(this.target);
+                
+                // Left/right movement
+                const targetDistance = offset.length() * Math.tan((camera.fov / 2) * Math.PI / 180.0);
+                const panLeft = new THREE.Vector3();
+                panLeft.setFromMatrixColumn(camera.matrix, 0); // Get X column
+                panLeft.multiplyScalar(-2 * delta.x * targetDistance / domElement.clientHeight);
+                
+                // Up/down movement
+                const panUp = new THREE.Vector3();
+                panUp.setFromMatrixColumn(camera.matrix, 1); // Get Y column
+                panUp.multiplyScalar(2 * delta.y * targetDistance / domElement.clientHeight);
+                
+                panOffset.add(panLeft).add(panUp);
+            }
+            
+            startPoint.copy(endPoint);
+        }
+        
+        function onMouseUp() {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            state = STATE.NONE;
+        }
+        
+        function onMouseWheel(event) {
+            event.preventDefault();
+            
+            if (event.deltaY < 0) {
+                scale /= 1.1;
+            } else {
+                scale *= 1.1;
+            }
+        }
+    }
+    
+    // Initialize the scene
+    function init() {
+        // Create scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+        
+        // Create camera
+        camera = new THREE.PerspectiveCamera(
+            60,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        camera.position.set(0, 10, 30);
+        
+        // Create renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+        
+        // Create orbit controls
+        controls = new SimplifiedOrbitControls(camera, renderer.domElement);
+        
+        // Setup raycaster for interaction
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+        
+        // Add event listeners
+        window.addEventListener('resize', onWindowResize);
+        renderer.domElement.addEventListener('click', onMouseClick);
+        renderer.domElement.addEventListener('mousemove', onMouseMove);
+        
+        // Build the 3D scene
+        createLighting();
+        createGround();
+        createBuilding();
+        createParkingLot();
+        createTrees();
+        
+        // Hide loading screen
+        setTimeout(() => {
+            document.getElementById('loading').classList.add('hidden');
+        }, 1000);
+        
+        // Start animation loop
+        animate();
+    }
+    
+    // Create lighting for the scene
+    function createLighting() {
+        // Ambient light for overall illumination
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        // Directional light for shadows (like sunlight)
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 15);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 1024;
+        directionalLight.shadow.mapSize.height = 1024;
+        scene.add(directionalLight);
+    }
+    
+    // Create ground plane with grass texture
+    function createGround() {
+        // Main ground/lot
+        const groundGeometry = new THREE.PlaneGeometry(60, 40);
+        const groundMaterial = new THREE.MeshStandardMaterial({
+            color: 0x7CFC00,  // Lawn green
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2; // Rotate to horizontal
+        ground.receiveShadow = true;
+        scene.add(ground);
+    }
+    
+    // Create the apartment building
+    function createBuilding() {
+        // Main building foundation
+        const buildingWidth = 40;
+        const buildingDepth = 10;
+        const buildingHeight = 4;
+        const unitWidth = buildingWidth / 8; // 8 units
+        
+        // Building base with yellow brick material
+        const buildingGeometry = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
+        const buildingMaterial = new THREE.MeshStandardMaterial({
+            color: 0xF9C74F,  // Yellow brick
+            roughness: 0.7,
+            metalness: 0.2
+        });
+        const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+        building.position.y = buildingHeight / 2;
+        building.castShadow = true;
+        building.receiveShadow = true;
+        scene.add(building);
+        
+        // Create roof
+        const roofGeometry = new THREE.BoxGeometry(buildingWidth + 1, 0.5, buildingDepth + 1);
+        const roofMaterial = new THREE.MeshStandardMaterial({
+            color: 0x666666,  // Dark gray
+            roughness: 0.6,
+            metalness: 0.3
+        });
+        const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+        roof.position.y = buildingHeight + 0.25;
+        roof.castShadow = true;
+        scene.add(roof);
+        
+        // Create individual units
+        for (let i = 0; i < 8; i++) {
+            // Create unit with slightly different material to allow for highlighting
+            const unitGeometry = new THREE.BoxGeometry(unitWidth - 0.1, buildingHeight, buildingDepth - 0.1);
+            const unitMaterial = new THREE.MeshStandardMaterial({
+                color: 0xF9C74F,
+                roughness: 0.7,
+                metalness: 0.2
+            });
+            const unit = new THREE.Mesh(unitGeometry, unitMaterial);
+            
+            // Position unit within the building
+            unit.position.x = -buildingWidth / 2 + unitWidth / 2 + i * unitWidth;
+            unit.position.y = buildingHeight / 2;
+            unit.userData = { isUnit: true, unitIndex: i };
+            
+            scene.add(unit);
+            unitMeshes.push(unit);
+            
+            // Add door to unit (white)
+            const doorWidth = 1.2;
+            const doorHeight = 2.5;
+            const doorGeometry = new THREE.BoxGeometry(doorWidth, doorHeight, 0.2);
+            const doorMaterial = new THREE.MeshStandardMaterial({
+                color: 0xFFFFFF,  // White
+                roughness: 0.5,
+                metalness: 0.1
+            });
+            const door = new THREE.Mesh(doorGeometry, doorMaterial);
+            door.position.z = buildingDepth / 2 + 0.1;
+            door.position.y = -buildingHeight / 2 + doorHeight / 2;
+            door.castShadow = true;
+            unit.add(door);
+            
+            // Add windows (two per unit)
+            const windowWidth = 1.2;
+            const windowHeight = 1.5;
+            const windowGeometry = new THREE.BoxGeometry(windowWidth, windowHeight, 0.1);
+            const windowMaterial = new THREE.MeshStandardMaterial({
+                color: 0x87CEEB,  // Sky blue
+                roughness: 0.3,
+                metalness: 0.3,
+                transparent: true,
+                opacity: 0.7
+            });
+            
+            // Left window
+            const leftWindow = new THREE.Mesh(windowGeometry, windowMaterial);
+            leftWindow.position.z = buildingDepth / 2 + 0.05;
+            leftWindow.position.x = -unitWidth / 4;
+            leftWindow.position.y = 0.5;
+            leftWindow.castShadow = true;
+            unit.add(leftWindow);
+            
+            // Right window
+            const rightWindow = new THREE.Mesh(windowGeometry, windowMaterial);
+            rightWindow.position.z = buildingDepth / 2 + 0.05;
+            rightWindow.position.x = unitWidth / 4;
+            rightWindow.position.y = 0.5;
+            rightWindow.castShadow = true;
+            unit.add(rightWindow);
+            
+            // Add unit number text (simplified, using a small plane as a label)
+            const labelGeometry = new THREE.PlaneGeometry(1, 0.5);
+            const labelMaterial = new THREE.MeshBasicMaterial({
+                color: 0x333333,
+                side: THREE.DoubleSide
+            });
+            const label = new THREE.Mesh(labelGeometry, labelMaterial);
+            label.position.z = buildingDepth / 2 + 0.15;
+            label.position.y = 1.5;
+            unit.add(label);
+        }
+    }
+    
+    // Create parking lot with spaces
+    function createParkingLot() {
+        // Main parking lot
+        const parkingWidth = 25;
+        const parkingDepth = 15;
+        const parkingGeometry = new THREE.PlaneGeometry(parkingWidth, parkingDepth);
+        const parkingMaterial = new THREE.MeshStandardMaterial({
+            color: 0x333333,  // Asphalt
+            roughness: 0.9,
+            metalness: 0.1
+        });
+        const parkingLot = new THREE.Mesh(parkingGeometry, parkingMaterial);
+        parkingLot.rotation.x = -Math.PI / 2;
+        parkingLot.position.z = -12;
+        parkingLot.position.y = 0.01; // Slightly above ground
+        parkingLot.receiveShadow = true;
+        scene.add(parkingLot);
+        
+        // Create parking spaces
+        const spaceWidth = 3;
+        const spaceDepth = 6;
+        const spacesPerRow = 8;
+        const rows = 2;
+        
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < spacesPerRow; col++) {
+                // Parking space outlines
+                const lineGeometry = new THREE.BufferGeometry();
+                
+                // Create rectangle vertices
+                const halfWidth = spaceWidth / 2 - 0.1;
+                const halfDepth = spaceDepth / 2 - 0.1;
+                
+                const vertices = new Float32Array([
+                    -halfWidth, 0, -halfDepth,
+                    halfWidth, 0, -halfDepth,
+                    halfWidth, 0, halfDepth,
+                    -halfWidth, 0, halfDepth,
+                    -halfWidth, 0, -halfDepth
+                ]);
+                
+                lineGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+                
+                const lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0xFFFFFF
+                });
+                
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                
+                line.rotation.x = -Math.PI / 2;
+                line.position.x = -parkingWidth / 2 + spaceWidth / 2 + col * spaceWidth;
+                line.position.z = -12 + (row === 0 ? -spaceDepth / 2 : spaceDepth / 2);
+                line.position.y = 0.02; // Slightly above the parking lot
+                
+                scene.add(line);
+            }
+        }
+    }
+    
+    // Create trees around the property
+    function createTrees() {
+        // Define tree positions
+        const treePositions = [
+            { x: -25, z: -15 },
+            { x: -20, z: 15 },
+            { x: -15, z: -10 },
+            { x: -5, z: 18 },
+            { x: 5, z: -18 },
+            { x: 15, z: 12 },
+            { x: 20, z: -12 },
+            { x: 25, z: 15 }
+        ];
+        
+        treePositions.forEach(pos => {
+            // Tree trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.6, 3, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8B4513,  // Brown
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.set(pos.x, 1.5, pos.z);
+            trunk.castShadow = true;
+            trunk.receiveShadow = true;
+            scene.add(trunk);
+            
+            // Tree foliage
+            const foliageGeometry = new THREE.SphereGeometry(2.5, 10, 10);
+            const foliageMaterial = new THREE.MeshStandardMaterial({
+                color: 0x228B22,  // Forest green
+                roughness: 0.8,
+                metalness: 0.1
+            });
+            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+            foliage.position.set(pos.x, 4.5, pos.z);
+            foliage.castShadow = true;
+            foliage.receiveShadow = true;
+            scene.add(foliage);
+        });
+    }
+    
+    // Handle window resizing
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    // Handle mouse click events for unit selection
+    function onMouseClick(event) {
+        // Calculate mouse position in normalized device coordinates
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        // Update the picking ray with the camera and mouse position
+        raycaster.setFromCamera(mouse, camera);
+        
+        // Calculate objects intersecting the ray
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        
+        // Check for unit intersections
+        let foundUnit = false;
+        
+        for (let i = 0; i < intersects.length; i++) {
+            // Find the parent unit mesh (if clicked on a door/window)
+            let object = intersects[i].object;
+            let testObj = object;
+            
+            // Traverse up to find parent with userData.isUnit
+            while (testObj && !testObj.userData.isUnit && testObj.parent) {
+                testObj = testObj.parent;
+            }
+            
+            if (testObj && testObj.userData.isUnit) {
+                const unitIndex = testObj.userData.unitIndex;
+                selectUnit(unitIndex);
+                foundUnit = true;
+                break;
+            }
+        }
+        
+        // If didn't click on a unit, deselect
+        if (!foundUnit && selectedUnit !== null) {
+            deselectUnit();
+        }
+    }
+    
+    // Handle mouse move for hover effects
+    function onMouseMove(event) {
+        // Calculate mouse position
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        // Update the picking ray
+        raycaster.setFromCamera(mouse, camera);
+        
+        // Check for intersects
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        
+        // Reset all unit colors
+        unitMeshes.forEach(unit => {
+            if (unit !== selectedUnit) {
+                unit.material.color.setHex(0xF9C74F); // Reset to default yellow
+                if (unit.material.emissive) {
+                    unit.material.emissive.setHex(0x000000); // No emissive
+                }
+            }
+        });
+        
+        // Highlight hovered unit
+        let hoveredUnit = null;
+        
+        for (let i = 0; i < intersects.length; i++) {
+            // Find parent unit
+            let object = intersects[i].object;
+            let testObj = object;
+            
+            // Traverse up to find parent with userData.isUnit
+            while (testObj && !testObj.userData.isUnit && testObj.parent) {
+                testObj = testObj.parent;
+            }
+            
+            if (testObj && testObj.userData.isUnit && testObj !== selectedUnit) {
+                if (testObj.material.emissive) {
+                    testObj.material.emissive.setHex(0x331100); // Subtle glow
+                }
+                hoveredUnit = testObj;
+                break;
+            }
+        }
+        
+        // Update cursor
+        document.body.style.cursor = hoveredUnit ? 'pointer' : 'default';
+    }
+    
+    // Select a unit
+    function selectUnit(index) {
+        // Deselect previous
+        if (selectedUnit !== null) {
+            deselectUnit();
+        }
+        
+        // Highlight selected unit
+        selectedUnit = unitMeshes[index];
+        selectedUnit.material.color.setHex(0xFFA500); // Orange highlight
+        
+        // Update info panel
+        const unitInfo = unitData[index];
+        document.getElementById('unit-number').textContent = `Unit: ${unitInfo.number}`;
+        document.getElementById('unit-size').textContent = `Size: ${unitInfo.size}`;
+        document.getElementById('unit-features').textContent = `Features: ${unitInfo.features}`;
+        
+        // Show info panel
+        unitInfoPanel.classList.add('active');
+    }
+    
+    // Deselect current unit
+    function deselectUnit() {
+        if (selectedUnit !== null) {
+            selectedUnit.material.color.setHex(0xF9C74F); // Reset to yellow
+            selectedUnit = null;
+            
+            // Hide info panel
+            unitInfoPanel.classList.remove('active');
+        }
+    }
+    
+    // Animation loop
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    
+    // Start the application
+    init();
+    </script>
+</body>
+</html>
